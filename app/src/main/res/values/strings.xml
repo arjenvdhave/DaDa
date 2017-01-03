@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">DaDa</string>
+    <string name="btn_record">Opnemen</string>
+    <string name="btn_play">Afspelen</string>
+    <string name="btn_stop">Stoppen</string>
+    <string name="btn_retry_persmissions">Vraag nogmaals</string>
+</resources>

@@ -4,4 +4,5 @@
     <string name="btn_play">Afspelen</string>
     <string name="btn_stop">Stoppen</string>
     <string name="btn_retry_persmissions">Vraag nogmaals</string>
+    <string name="btn_take_photo">Klik</string>
 </resources>

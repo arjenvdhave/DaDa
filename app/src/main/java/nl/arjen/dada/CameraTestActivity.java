@@ -6,6 +6,8 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
+import android.graphics.Matrix;
+import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -46,27 +48,35 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 
+import nl.arjen.dada.camera.DaDaCameraManager;
+
 public class CameraTestActivity extends Activity {
 
     private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
+
     static {
-        ORIENTATIONS.append(Surface.ROTATION_0, 90);
+        ORIENTATIONS.append(Surface.ROTATION_0, 270);
         ORIENTATIONS.append(Surface.ROTATION_90, 0);
-        ORIENTATIONS.append(Surface.ROTATION_180, 270);
+        ORIENTATIONS.append(Surface.ROTATION_180, 90);
         ORIENTATIONS.append(Surface.ROTATION_270, 180);
     }
 
+
     private static final int STATE_PREVIEW = 0;
     private static final int STATE_WAIT_LOCK = 1;
+    private static final int STATE_IMAGE_CAPTURED = 2;
 
     private int currentState;
     private TextureView previewView;
     private Size previewSize;
     private String cameraId;
+    private String frontCameraId;
+    private String rearCameraId;
     private CameraDevice cameraDevice;
     private CaptureRequest captureRequest;
     private CameraCaptureSession cameraCaptureSession;
     private CaptureRequest.Builder previewBuilder;
+    private boolean hasFrontCamera = true;
 
     private HandlerThread backgroundThread;
     private Handler backgroundHandler;
@@ -77,17 +87,17 @@ public class CameraTestActivity extends Activity {
     private String GALLERY_LOCATION = "image gallery";
 
     private ImageReader imageReader;
-    private final OnImageAvailableListener  imageAvailableListener=
-        new OnImageAvailableListener(){
+    private final OnImageAvailableListener imageAvailableListener =
+            new OnImageAvailableListener() {
 
-            @Override
-            public void onImageAvailable(ImageReader reader) {
-                backgroundHandler.post(new ImageSaver(reader.acquireNextImage() ));
-            }
-        };
+                @Override
+                public void onImageAvailable(ImageReader reader) {
+                    backgroundHandler.post(new ImageSaver(reader.acquireNextImage()));
+                }
+            };
 
 
-    private static class ImageSaver implements Runnable{
+    private static class ImageSaver implements Runnable {
 
         private final Image image;
 
@@ -112,7 +122,7 @@ public class CameraTestActivity extends Activity {
                 e.printStackTrace();
             } finally {
                 image.close();
-                if(fileOutputStream != null) {
+                if (fileOutputStream != null) {
                     try {
                         fileOutputStream.close();
                     } catch (IOException e) {
@@ -135,7 +145,6 @@ public class CameraTestActivity extends Activity {
         @Override
         public void onCaptureFailed(CameraCaptureSession session, CaptureRequest request, CaptureFailure failure) {
             super.onCaptureFailed(session, request, failure);
-            Log.d("DaDa", "Focus faal");
         }
 
         private void process(TotalCaptureResult result) {
@@ -147,8 +156,10 @@ public class CameraTestActivity extends Activity {
                     if (hasAutoFocus() && autoFocusState == CaptureRequest.CONTROL_AF_STATE_FOCUSED_LOCKED) {
                         captureStillImage();
                     }
-                    if(!hasAutoFocus())
+                    if (!hasAutoFocus())
                         captureStillImage();
+
+                    currentState = STATE_IMAGE_CAPTURED;
                     break;
             }
         }
@@ -163,11 +174,14 @@ public class CameraTestActivity extends Activity {
             CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
             CameraCharacteristics c = manager.getCameraCharacteristics(cameraId);
             minimumLens = c.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
-        } catch (Exception e) { }
+        } catch (Exception e) {
+        }
         if (minimumLens != null)
             return minimumLens > 0;
         return false;
     }
+
+    private DaDaCameraManager daDaCameraManager;
 
 
     @Override
@@ -185,38 +199,48 @@ public class CameraTestActivity extends Activity {
             previewView = (TextureView) findViewById(R.id.tvCameraPreview);
         }
 
+        daDaCameraManager = new DaDaCameraManager(this, previewView, createImageFile());
+
         createImageGallery();
 
         Button btnTakePhoto = (Button) findViewById(R.id.btnTakePhoto);
         btnTakePhoto.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                try {
-                    imageFile = createImageFile();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-                lockFocus();
+                daDaCameraManager.takePhoto();
+                //lockFocus();
+            }
+        });
+
+        findViewById(R.id.btnRotate).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+
             }
         });
     }
 
-    private File createImageFile() throws IOException {
+    private File createImageFile() {
 
         String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
         String imageFileName = "IMAGE_" + timeStamp + "_";
 
-        File image = File.createTempFile(imageFileName,".jpg", mGalleryFolder);
-        mImageFileLocation = image.getAbsolutePath();
+        try {
+            File image = File.createTempFile(imageFileName, ".jpg", mGalleryFolder);
+            mImageFileLocation = image.getAbsolutePath();
 
-        return image;
+            return image;
+        } catch (IOException e) {
+            //todo iets doen
+        }
+        return null;
 
     }
 
     private void createImageGallery() {
         File storageDirectory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
         mGalleryFolder = new File(storageDirectory, GALLERY_LOCATION);
-        if(!mGalleryFolder.exists()) {
+        if (!mGalleryFolder.exists()) {
             mGalleryFolder.mkdirs();
         }
 
@@ -225,17 +249,25 @@ public class CameraTestActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        daDaCameraManager.init();
+        /*openBackgroundThread();
+        setupCameraIds();
 
-        openBackgroundThread();
+        if (hasFrontCamera)
+            cameraId = frontCameraId;
+        else
+            cameraId = rearCameraId;
 
         if (previewView.isAvailable()) {
             setupCamera(previewView.getWidth(), previewSize.getHeight());
+            transformImage(previewView.getWidth(), previewView.getHeight());
             openCamera();
         } else {
             previewView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
                 @Override
                 public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
                     setupCamera(width, height);
+                    transformImage(width, height);
                     openCamera();
                 }
 
@@ -254,30 +286,44 @@ public class CameraTestActivity extends Activity {
 
                 }
             });
-        }
+        }*/
     }
 
     @Override
     protected void onPause() {
-        closeCamera();
-        closeBackgroundThread();
-
+//        closeCamera();
+//        closeBackgroundThread();
+        daDaCameraManager.closeCamera();
         super.onPause();
     }
 
-    private void setupCamera(int width, int height) {
+    private void setupCameraIds() {
         try {
             CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
             //check if there is a front facing camera, if not default back to the first available camera
             for (String id : cameraManager.getCameraIdList()) {
                 if (cameraManager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING) ==
                         CameraCharacteristics.LENS_FACING_FRONT) {
-                    cameraId = id;
-                    break;
+                    frontCameraId = id;
+                    hasFrontCamera = true;
+                } else if (cameraManager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING) ==
+                        CameraCharacteristics.LENS_FACING_BACK) {
+                    rearCameraId = id;
                 }
             }
-            if (cameraId == null)
-                cameraId = cameraManager.getCameraIdList()[0];
+
+            if (frontCameraId == null && rearCameraId == null) {
+                //TODO iets van een melding dat er geen camera is
+            }
+        } catch (Exception e) {
+
+        }
+    }
+
+    private void setupCamera(int width, int height) {
+        try {
+            CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+
 
             CameraCharacteristics cc = cameraManager.getCameraCharacteristics(cameraId);
             StreamConfigurationMap streamConfigs = cc.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
@@ -290,7 +336,7 @@ public class CameraTestActivity extends Activity {
                         }
                     });
 
-            imageReader =  ImageReader.newInstance(largestImageSize.getWidth(), largestImageSize.getHeight(), ImageFormat.JPEG,1);
+            imageReader = ImageReader.newInstance(largestImageSize.getWidth(), largestImageSize.getHeight(), ImageFormat.JPEG, 1);
             imageReader.setOnImageAvailableListener(imageAvailableListener, backgroundHandler);
 
             previewSize = getPreferredSizePreviewSize(streamConfigs.getOutputSizes(SurfaceTexture.class), width, height);
@@ -382,7 +428,7 @@ public class CameraTestActivity extends Activity {
             cameraDevice = null;
         }
 
-        if(imageReader != null){
+        if (imageReader != null) {
             imageReader.close();
             imageReader = null;
         }
@@ -458,13 +504,13 @@ public class CameraTestActivity extends Activity {
         currentState = STATE_PREVIEW;
         previewBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL);
         try {
-            cameraCaptureSession.capture(previewBuilder.build(), captureCallback, backgroundHandler);
+            cameraCaptureSession.setRepeatingRequest(previewBuilder.build(), captureCallback, backgroundHandler);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private void captureStillImage(){
+    private void captureStillImage() {
         try {
             CaptureRequest.Builder captureStillBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
             captureStillBuilder.addTarget(imageReader.getSurface());
@@ -474,6 +520,13 @@ public class CameraTestActivity extends Activity {
             captureStillBuilder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS.get(rotation));
 
             CameraCaptureSession.CaptureCallback stillCallback = new CameraCaptureSession.CaptureCallback() {
+
+                @Override
+                public void onCaptureStarted(CameraCaptureSession session, CaptureRequest request, long timestamp, long frameNumber) {
+                    super.onCaptureStarted(session, request, timestamp, frameNumber);
+                    imageFile = createImageFile();
+                }
+
                 @Override
                 public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
                     super.onCaptureCompleted(session, request, result);
@@ -482,9 +535,39 @@ public class CameraTestActivity extends Activity {
                 }
             };
 
-            cameraCaptureSession.capture(captureStillBuilder.build(),stillCallback, null);
+            cameraCaptureSession.stopRepeating();
+            cameraCaptureSession.capture(captureStillBuilder.build(), stillCallback, null);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Magie om de het roteren van het scherm goed te laten verlopen om sommige toestellen (bijv. Samsung)
+     *
+     * @param width
+     * @param height
+     */
+    private void transformImage(int width, int height) {
+        if (previewSize == null || previewView == null)
+            return;
+
+        Matrix matrix = new Matrix();
+        int rotation = getWindowManager().getDefaultDisplay().getRotation();
+        RectF textureRectF = new RectF(0, 0, width, height);
+        RectF previewRectF = new RectF(0, 0, previewSize.getHeight(), previewSize.getWidth());
+
+        float centerX = textureRectF.centerX();
+        float centerY = textureRectF.centerY();
+
+        if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+            previewRectF.offset(centerX - previewRectF.centerX(), centerY - previewRectF.centerY());
+            matrix.setRectToRect(textureRectF, previewRectF, Matrix.ScaleToFit.FILL);
+            float scale = Math.max((float) width / previewSize.getWidth(),
+                    (float) height / previewSize.getHeight());
+            matrix.postScale(scale, scale, centerX, centerY);
+            matrix.postRotate(90 * (rotation - 2), centerX, centerY);
+        }
+        previewView.setTransform(matrix);
     }
 }

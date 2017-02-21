@@ -1,6 +1,5 @@
 package nl.arjen.dada.camera;
 
-import android.app.Activity;
 import android.content.Context;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -11,8 +10,6 @@ import android.hardware.camera2.CaptureFailure;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
-import android.media.ImageReader;
-import android.os.Handler;
 import android.util.SparseIntArray;
 import android.view.Surface;
 
@@ -25,10 +22,14 @@ public class DaDaCameraCaptureCallback extends CameraCaptureSession.CaptureCallb
     private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
 
     static {
-        ORIENTATIONS.append(Surface.ROTATION_0, 270);
-        ORIENTATIONS.append(Surface.ROTATION_90, 0);
-        ORIENTATIONS.append(Surface.ROTATION_180, 90);
-        ORIENTATIONS.append(Surface.ROTATION_270, 180);
+        ORIENTATIONS.append(Surface.ROTATION_0,
+                            270);
+        ORIENTATIONS.append(Surface.ROTATION_90,
+                            0);
+        ORIENTATIONS.append(Surface.ROTATION_180,
+                            90);
+        ORIENTATIONS.append(Surface.ROTATION_270,
+                            180);
     }
 
 
@@ -38,34 +39,25 @@ public class DaDaCameraCaptureCallback extends CameraCaptureSession.CaptureCallb
 
     private int currentState;
 
-    private String cameraId;
-    private Activity context;
-    private CameraDevice cameraDevice;
-    private ImageReader imageReader;
-    private CameraCaptureSession cameraCaptureSession;
-    private CaptureRequest.Builder previewBuilder;
-    private Handler backgroundHandler;
+    private CameraContext cameraContext;
 
-    //TODO deze constructor zuigt natuurlijk kijken of dot anders kan
-    public DaDaCameraCaptureCallback(String cameraId, Activity context, CameraDevice cameraDevice, ImageReader imageReader, CameraCaptureSession cameraCaptureSession, CaptureRequest.Builder previewBuilder, Handler backgroundHandler) {
-        this.cameraId = cameraId;
-        this.context = context;
-        this.cameraDevice = cameraDevice;
-        this.imageReader = imageReader;
-        this.cameraCaptureSession = cameraCaptureSession;
-        this.previewBuilder = previewBuilder;
-        this.backgroundHandler = backgroundHandler;
+    public DaDaCameraCaptureCallback(CameraContext cameraContext) {
+        this.cameraContext = cameraContext;
     }
 
     @Override
     public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
-        super.onCaptureCompleted(session, request, result);
+        super.onCaptureCompleted(session,
+                                 request,
+                                 result);
         process(result);
     }
 
     @Override
     public void onCaptureFailed(CameraCaptureSession session, CaptureRequest request, CaptureFailure failure) {
-        super.onCaptureFailed(session, request, failure);
+        super.onCaptureFailed(session,
+                              request,
+                              failure);
     }
 
     private void process(TotalCaptureResult result) {
@@ -86,13 +78,15 @@ public class DaDaCameraCaptureCallback extends CameraCaptureSession.CaptureCallb
     }
 
     private boolean hasAutoFocus() {
-        if (cameraId == null)
+        if (cameraContext.getCameraId() == null)
             return false;
 
         Float minimumLens = null;
         try {
-            CameraManager manager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
-            CameraCharacteristics c = manager.getCameraCharacteristics(cameraId);
+            CameraManager cameraManager = (CameraManager) cameraContext.getContext()
+                                                                       .getSystemService(Context.CAMERA_SERVICE);
+            CameraCharacteristics c = cameraManager.getCameraCharacteristics(cameraContext
+                                                                                     .getCameraId());
             minimumLens = c.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
         } catch (Exception e) {
         }
@@ -103,24 +97,32 @@ public class DaDaCameraCaptureCallback extends CameraCaptureSession.CaptureCallb
 
     private void captureStillImage() {
         try {
-            CaptureRequest.Builder captureStillBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
-            captureStillBuilder.addTarget(imageReader.getSurface());
+            CaptureRequest.Builder captureStillBuilder = cameraContext.getCameraDevice()
+                                                                      .createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+            captureStillBuilder.addTarget(cameraContext.getImageReader().getSurface());
 
-            int rotation = context.getWindowManager().getDefaultDisplay().getRotation();
+            int rotation = cameraContext.getContext().getWindowManager()
+                                        .getDefaultDisplay()
+                                        .getRotation();
 
-            captureStillBuilder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS.get(rotation));
+            captureStillBuilder.set(CaptureRequest.JPEG_ORIENTATION,
+                                    ORIENTATIONS.get(rotation));
 
             CameraCaptureSession.CaptureCallback stillCallback = new CameraCaptureSession.CaptureCallback() {
 
                 @Override
                 public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
-                    super.onCaptureCompleted(session, request, result);
+                    super.onCaptureCompleted(session,
+                                             request,
+                                             result);
                     unlockFocus();
                 }
             };
 
-            cameraCaptureSession.stopRepeating();
-            cameraCaptureSession.capture(captureStillBuilder.build(), stillCallback, null);
+            cameraContext.getCameraCaptureSession().stopRepeating();
+            cameraContext.getCameraCaptureSession().capture(captureStillBuilder.build(),
+                                                            stillCallback,
+                                                            null);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -128,9 +130,15 @@ public class DaDaCameraCaptureCallback extends CameraCaptureSession.CaptureCallb
 
     private void unlockFocus() {
         currentState = STATE_PREVIEW;
-        previewBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL);
+        cameraContext.getPreviewBuilder().set(CaptureRequest.CONTROL_AF_TRIGGER,
+                                              CaptureRequest.CONTROL_AF_TRIGGER_CANCEL);
         try {
-            cameraCaptureSession.setRepeatingRequest(previewBuilder.build(), this, backgroundHandler);
+            cameraContext.getCameraCaptureSession().setRepeatingRequest(cameraContext
+                                                                                .getPreviewBuilder()
+                                                                                .build(),
+                                                                        this,
+                                                                        cameraContext
+                                                                                .getBackgroundHandler());
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -138,9 +146,15 @@ public class DaDaCameraCaptureCallback extends CameraCaptureSession.CaptureCallb
 
     public void lockFocus() {
         currentState = STATE_WAIT_LOCK;
-        previewBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START);
+        cameraContext.getPreviewBuilder().set(CaptureRequest.CONTROL_AF_TRIGGER,
+                                              CaptureRequest.CONTROL_AF_TRIGGER_START);
         try {
-            cameraCaptureSession.capture(previewBuilder.build(), this, backgroundHandler);
+            cameraContext.getCameraCaptureSession().capture(cameraContext
+                                                                    .getPreviewBuilder()
+                                                                    .build(),
+                                                            this,
+                                                            cameraContext
+                                                                    .getBackgroundHandler());
         } catch (Exception e) {
             e.printStackTrace();
         }

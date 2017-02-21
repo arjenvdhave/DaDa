@@ -1,15 +1,9 @@
 package nl.arjen.dada.camera;
 
-import android.app.Activity;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraDevice;
-import android.hardware.camera2.CaptureRequest;
-import android.media.ImageReader;
-import android.os.Handler;
-import android.util.Size;
 import android.view.Surface;
-import android.view.TextureView;
 
 import java.util.Arrays;
 
@@ -20,28 +14,11 @@ import java.util.Arrays;
 public class DaDaCameraStateCallback extends CameraDevice.StateCallback {
 
     private DaDaCameraCaptureCallback daDaCameraCaptureCallback;
-
-    private CameraDevice cameraDevice;
-    private CaptureRequest captureRequest;
-    private CameraCaptureSession cameraCaptureSession;
-    private CaptureRequest.Builder previewBuilder;
-
-    private Size previewSize;
-    private TextureView previewView;
-    private Handler backgroundHandler;
-    private ImageReader imageReader;
-
-    private String cameraId;
-    private Activity context;
+    private CameraContext cameraContext;
 
 
-    public DaDaCameraStateCallback(Size previewSize, TextureView previewView, Handler backgroundHandler, ImageReader imageReader, String cameraId, Activity context) {
-        this.previewSize = previewSize;
-        this.previewView = previewView;
-        this.backgroundHandler = backgroundHandler;
-        this.imageReader = imageReader;
-        this.cameraId = cameraId;
-        this.context = context;
+    public DaDaCameraStateCallback(CameraContext cameraContext) {
+        this.cameraContext = cameraContext;
     }
 
     public void takePhoto() {
@@ -49,80 +26,86 @@ public class DaDaCameraStateCallback extends CameraDevice.StateCallback {
     }
 
     public void closeCamera() {
-        if (cameraCaptureSession != null) {
-            cameraCaptureSession.close();
-            cameraCaptureSession = null;
+        if (cameraContext.getCameraCaptureSession() != null) {
+            cameraContext.getCameraCaptureSession().close();
+            cameraContext.setCameraCaptureSession(null);
         }
 
-        if (cameraDevice != null) {
-            cameraDevice.close();
-            cameraDevice = null;
+        if (cameraContext.getCameraDevice() != null) {
+            cameraContext.getCameraDevice().close();
+            cameraContext.setCameraDevice(null);
         }
-
-
     }
 
     @Override
     public void onOpened(CameraDevice camera) {
-        cameraDevice = camera;
+        cameraContext.setCameraDevice(camera);
         createCameraPreviewSession();
     }
 
     @Override
     public void onDisconnected(CameraDevice camera) {
         camera.close();
-        cameraDevice = null;
+        cameraContext.setCameraDevice(null);
     }
 
     @Override
     public void onError(CameraDevice camera, int error) {
         camera.close();
-        cameraDevice = null;
+        cameraContext.setCameraDevice(null);
     }
 
     private void createCameraPreviewSession() {
         try {
-            SurfaceTexture surfaceTexture = previewView.getSurfaceTexture();
-            surfaceTexture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
+            SurfaceTexture surfaceTexture = cameraContext.getPreviewView().getSurfaceTexture();
+            surfaceTexture.setDefaultBufferSize(cameraContext.getPreviewSize().getWidth(),
+                                                cameraContext.getPreviewSize().getHeight());
 
             Surface previewSurface = new Surface(surfaceTexture);
 
-            previewBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-            previewBuilder.addTarget(previewSurface);
-            cameraDevice.createCaptureSession(Arrays.asList(previewSurface, imageReader.getSurface()), new CameraCaptureSession.StateCallback() {
-                @Override
-                public void onConfigured(CameraCaptureSession session) {
-                    if (cameraDevice == null)
-                        return;
-
-                    try {
-                        captureRequest = previewBuilder.build();
-                        cameraCaptureSession = session;
-
-                        daDaCameraCaptureCallback = new DaDaCameraCaptureCallback(cameraId,
-                                context,
-                                cameraDevice,
-                                imageReader,
-                                cameraCaptureSession,
-                                previewBuilder,
-                                backgroundHandler);
-
-                        cameraCaptureSession.setRepeatingRequest(captureRequest,
-                                daDaCameraCaptureCallback,
-                                backgroundHandler);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-
-                }
-
-                @Override
-                public void onConfigureFailed(CameraCaptureSession session) {
-
-                }
-            }, backgroundHandler);
+            cameraContext.setPreviewBuilder(cameraContext.getCameraDevice()
+                                                         .createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW));
+            cameraContext.getPreviewBuilder().addTarget(previewSurface);
+            cameraContext.getCameraDevice().createCaptureSession(Arrays.asList(previewSurface,
+                                                                               cameraContext
+                                                                                       .getImageReader()
+                                                                                       .getSurface()),
+                                                                 getStateCallback(),
+                                                                 cameraContext
+                                                                         .getBackgroundHandler());
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    private CameraCaptureSession.StateCallback getStateCallback() {
+        return new CameraCaptureSession.StateCallback() {
+            @Override
+            public void onConfigured(CameraCaptureSession session) {
+                if (cameraContext.getCameraDevice() == null)
+                    return;
+
+                try {
+                    cameraContext.setCaptureRequest(cameraContext.getPreviewBuilder().build());
+                    cameraContext.setCameraCaptureSession(session);
+
+                    daDaCameraCaptureCallback = new DaDaCameraCaptureCallback(cameraContext);
+
+                    cameraContext
+                            .getCameraCaptureSession()
+                            .setRepeatingRequest(cameraContext.getCaptureRequest(),
+                                                 daDaCameraCaptureCallback,
+                                                 cameraContext.getBackgroundHandler());
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+
+            }
+
+            @Override
+            public void onConfigureFailed(CameraCaptureSession session) {
+
+            }
+        };
     }
 }
